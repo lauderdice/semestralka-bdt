@@ -1,0 +1,70 @@
+mkdir semestralka
+mkdir semestralka
+cd semestralka
+mkdir prodeje
+mkdir ciselniky
+cd ciselniky
+mkdir obchody
+mkdir sku
+mkdir sku_cat
+cd ..
+cd prodeje
+mkdir all
+mkdir history
+mkdir daily
+cd ..
+//Nasledne jsem zkopiroval soubory do příslušných složek přes FTP klienta
+
+hdfs dfs -put . .
+
+beeline -u "jdbc:hive2://hador-c1.ics.muni.cz:10000/default;principal=hive/hador-c1.ics.muni.cz@ICS.MUNI.CZ"
+create database semestralka_lauderdice;
+use semestralka_lauderdice;
+set hive.exec.dynamic.partition=true;
+set hive.exec.dynamic.partition.mode=nonstrict;
+
+DROP TABLE sales_temp;
+CREATE EXTERNAL TABLE sales_temp ( datum string, date_block_num int, shop_id int, item_id int, item_price double,item_cnt_day int) ROW FORMAT DELIMITED FIELDS TERMINATED BY ',' LINES TERMINATED BY '\n'  STORED AS TEXTFILE   LOCATION '/user/lauderdice/semestralka/prodeje/all'  tblproperties("skip.header.line.count" = "1");
+SELECT * FROM sales_temp limit 10;
+DROP TABLE sales;
+CREATE TABLE sales ( datum string, shop_id int, item_id int, itemcat_id int, item_price double,item_cnt_day int) partitioned by (date_block_num int) stored as parquet tblproperties("parquet.compress"="SNAPPY");
+
+DROP TABLE items_temp;
+CREATE EXTERNAL TABLE items_temp ( item_name string, item_id int, item_category_id int) ROW FORMAT SERDE 'org.apache.hadoop.hive.serde2.OpenCSVSerde' WITH SERDEPROPERTIES ("separatorChar" = ",", "quoteChar"= "\"","serialization.encoding"='utf-8') LOCATION '/user/lauderdice/semestralka/ciselniky/sku'  tblproperties("skip.header.line.count" = "1");
+SELECT * FROM items_temp limit 10;
+DROP TABLE items;
+CREATE TABLE items ( item_name string, item_id int, item_category_id int) stored as parquet tblproperties("parquet.compress"="SNAPPY");
+INSERT overwrite table items select item_name, item_id, item_category_id from items_temp;
+SELECT * FROM items limit 10;
+DROP TABLE items_temp;
+
+INSERT overwrite table sales partition (date_block_num) select s.datum , s.shop_id, s.item_id, i.item_category_id, s.item_price, s.item_cnt_day, date_block_num from sales_temp s left join items i on (i.item_id = s.item_id) ;
+SELECT * FROM sales limit 10;
+DROP TABLE sales_temp;
+
+
+
+DROP TABLE obchody_temp;
+CREATE EXTERNAL TABLE obchody_temp ( shop_name string, shop_id int) ROW FORMAT SERDE 'org.apache.hadoop.hive.serde2.OpenCSVSerde' WITH SERDEPROPERTIES ("separatorChar" = ",", "quoteChar"= "\"","serialization.encoding"='utf-8') LOCATION '/user/lauderdice/semestralka/ciselniky/obchody'  tblproperties("skip.header.line.count" = "1");
+SELECT * FROM obchody_temp;
+DROP TABLE obchody;
+CREATE TABLE obchody ( shop_name string, shop_id int) stored as parquet tblproperties("parquet.compress"="SNAPPY");
+INSERT overwrite table obchody  select shop_name , shop_id  from obchody_temp;
+SELECT * FROM obchody limit 10;
+DROP TABLE obchody_temp;
+
+DROP TABLE cat_temp;
+CREATE EXTERNAL TABLE cat_temp ( cat_name string, cat_id int) ROW FORMAT SERDE 'org.apache.hadoop.hive.serde2.OpenCSVSerde' WITH SERDEPROPERTIES ("separatorChar" = ",", "quoteChar"= "\"","serialization.encoding"='utf-8') LOCATION '/user/lauderdice/semestralka/ciselniky/sku_cat'  tblproperties("skip.header.line.count" = "1");
+SELECT * FROM cat_temp limit 10;
+DROP TABLE cat;
+CREATE TABLE cat ( cat_name string, cat_id int) stored as parquet tblproperties("parquet.compress"="SNAPPY");
+INSERT overwrite table cat  select cat_name , cat_id from cat_temp;
+SELECT * FROM cat limit 10;
+DROP TABLE cat_temp;
+
+
+DROP TABLE salesfull;
+CREATE TABLE salesfull ( datum string, shop_id int,shop_name string, item_id int,item_name string,cat int,cat_name string, item_price double,item_cnt_day int) partitioned by (date_block_num int) stored as parquet tblproperties("parquet.compress"="SNAPPY");
+
+INSERT overwrite table salesfull partition (date_block_num) select s.datum , s.shop_id, o.shop_name, s.item_id, i.item_name, i.item_category_id, c.cat_name, s.item_price, s.item_cnt_day, s.date_block_num from sales s left join items i on (i.item_id = s.item_id) left join obchody o on (s.shop_id = o.shop_id) left join cat c on (c.cat_id = i.item_category_id);
+// konec prvotniho nastaveni
